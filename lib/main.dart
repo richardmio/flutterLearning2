@@ -1,78 +1,140 @@
-import 'package:flutter/cupertino.dart';
+import 'dart:async';
+import 'dart:io';
+
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_learning2/pages/HomePage.dart';
+import 'package:path/path.dart' show join;
+import 'package:path_provider/path_provider.dart';
 
-void main() => runApp(MyApp());
+Future<void> main() async {
+    // Obtain a list of the available cameras on the device.
+    final cameras = await availableCameras();
 
-class MyApp extends StatelessWidget {
-  // This widget is the root of your application.
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter learning',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // Try running your application with "flutter run". You'll see the
-        // application has a blue toolbar. Then, without quitting the app, try
-        // changing the primarySwatch below to Colors.green and then invoke
-        // "hot reload" (press "r" in the console where you ran "flutter run",
-        // or simply save your changes to "hot reload" in a Flutter IDE).
-        // Notice that the counter didn't reset back to zero; the application
-        // is not restarted.
-        backgroundColor: Colors.white,
-      ),
-      home: FrameWork(title: 'Flutter Learning Home Page'),
+    // Get a specific camera from the list of available cameras
+    final firstCamera = cameras.first;
+
+    runApp(
+        MaterialApp(
+            theme: ThemeData.dark(),
+            home: TakePictureScreen(
+                // Pass the appropriate camera to the TakePictureScreen Widget
+                camera: firstCamera,
+            ),
+        ),
     );
-  }
 }
 
-final _pageList = [
-    HomePage(),
-    HomePage(),
-    HomePage(),
-];
+// A screen that allows users to take a picture using a given camera
+class TakePictureScreen extends StatefulWidget {
+    final CameraDescription camera;
 
-class FrameWork extends StatefulWidget {
-    FrameWork({Key key, this.title}) : super(key: key);
-    final String title;
+    const TakePictureScreen({
+        Key key,
+        @required this.camera,
+    }) : super(key: key);
 
     @override
-    _FrameWorkState createState() => _FrameWorkState();
-
+    TakePictureScreenState createState() => TakePictureScreenState();
 }
 
-class _FrameWorkState extends State<FrameWork> {
-    int _pageIdx = 0;
+class TakePictureScreenState extends State<TakePictureScreen> {
+    CameraController _controller;
+    Future<void> _initializeControllerFuture;
 
-    void onTapped(int idx) {
-        setState(() {
-          _pageIdx = idx;
-        });
+    @override
+    void initState() {
+        super.initState();
+        // In order to display the current output from the Camera, you need to
+        // create a CameraController.
+        _controller = CameraController(
+            // Get a specific camera from the list of available cameras
+            widget.camera,
+            // Define the resolution to use
+            ResolutionPreset.medium,
+        );
+
+        // Next, you need to initialize the controller. This returns a Future
+        _initializeControllerFuture = _controller.initialize();
+    }
+
+    @override
+    void dispose() {
+        // Make sure to dispose of the controller when the Widget is disposed
+        _controller.dispose();
+        super.dispose();
     }
 
     @override
     Widget build(BuildContext context) {
         return Scaffold(
-            body: _pageList[_pageIdx],
-            bottomNavigationBar: BottomNavigationBar(
-                onTap: onTapped,
-                currentIndex: _pageIdx,
-                items: [
-                    BottomNavigationBarItem(
-                        icon: Icon(Icons.home),
-                        title: Text("home")
-                    ),
-                    BottomNavigationBarItem(
-                        icon: Icon(Icons.add_location),
-                        title: Text("add")
-                    ),
-                    BottomNavigationBarItem(
-                        icon: Icon(Icons.person),
-                        title: Text("me")
-                    ),
-                ],
+            appBar: AppBar(title: Text('Take a picture')),
+            // You must wait until the controller is initialized before displaying the
+            // camera preview. Use a FutureBuilder to display a loading spinner until
+            // the controller has finished initializing
+            body: FutureBuilder<void>(
+                future: _initializeControllerFuture,
+                builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.done) {
+                        // If the Future is complete, display the preview
+                        return CameraPreview(_controller);
+                    } else {
+                        // Otherwise, display a loading indicator
+                        return Center(child: CircularProgressIndicator());
+                    }
+                },
             ),
+            floatingActionButton: FloatingActionButton(
+                child: Icon(Icons.camera),
+                // Provide an onPressed callback
+                onPressed: () async {
+                    // Take the Picture in a try / catch block. If anything goes wrong,
+                    // catch the error.
+                    try {
+                        // Ensure the camera is initialized
+                        await _initializeControllerFuture;
+
+                        // Construct the path where the image should be saved using the path
+                        // package.
+                        final path = join(
+                            // In this example, store the picture in the temp directory. Find
+                            // the temp directory using the `path_provider` plugin.
+                            (await getTemporaryDirectory()).path,
+                            '${DateTime.now()}.png',
+                        );
+
+                        // Attempt to take a picture and log where it's been saved
+                        await _controller.takePicture(path);
+
+                        // If the picture was taken, display it on a new screen
+                        Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => DisplayPictureScreen(imagePath: path),
+                            ),
+                        );
+                    } catch (e) {
+                        // If an error occurs, log the error to the console.
+                        print(e);
+                    }
+                },
+            ),
+        );
+    }
+}
+
+// A Widget that displays the picture taken by the user
+class DisplayPictureScreen extends StatelessWidget {
+    final String imagePath;
+
+    const DisplayPictureScreen({Key key, this.imagePath}) : super(key: key);
+
+    @override
+    Widget build(BuildContext context) {
+        return Scaffold(
+            appBar: AppBar(title: Text('Display the Picture')),
+            // The image is stored as a file on the device. Use the `Image.file`
+            // constructor with the given path to display the image
+            body: Image.file(File(imagePath)),
         );
     }
 }
